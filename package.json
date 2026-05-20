@@ -1,0 +1,52 @@
+{
+  "name": "perps-turbo-repo",
+  "private": true,
+  "workspaces": {
+    "packages": [
+      "apps/*",
+      "packages/*"
+    ],
+    "catalog": {
+      "dotenv": "^17.2.2",
+      "zod": "^4.1.13",
+      "typescript": "^6",
+      "@types/bun": "^1.3.4",
+      "lucide-react": "^0.546.0",
+      "next-themes": "^0.4.6",
+      "react": "^19.2.3",
+      "react-dom": "^19.2.3",
+      "sonner": "^2.0.5",
+      "@types/react": "^19.2.10",
+      "@types/react-dom": "^19.2.3",
+      "tailwindcss": "^4.1.18"
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "check-types": "turbo check-types",
+    "dev:web": "turbo -F web dev",
+    "dev:server": "turbo -F server dev",
+    "db:push": "turbo -F @perps-turbo-repo/db db:push",
+    "db:studio": "turbo -F @perps-turbo-repo/db db:studio",
+    "db:generate": "turbo -F @perps-turbo-repo/db db:generate",
+    "db:migrate": "turbo -F @perps-turbo-repo/db db:migrate",
+    "db:start": "turbo -F @perps-turbo-repo/db db:start",
+    "db:watch": "turbo -F @perps-turbo-repo/db db:watch",
+    "db:stop": "turbo -F @perps-turbo-repo/db db:stop",
+    "db:down": "turbo -F @perps-turbo-repo/db db:down"
+  },
+  "dependencies": {
+    "@perps-turbo-repo/env": "workspace:*",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@perps-turbo-repo/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "turbo": "^2.8.12",
+    "typescript": "catalog:"
+  },
+  "packageManager": "bun@1.3.13"
+}
