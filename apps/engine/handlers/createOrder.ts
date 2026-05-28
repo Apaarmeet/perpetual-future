@@ -20,6 +20,18 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
 
     if (type === "market") {
         if (side === "buy") {
+
+            let qtyToBeOpen = qty
+            let qtyToBeClose = 0
+            let userPositions = POSITIONS.get(userId)
+            if(userPositions){ 
+                let userPositions_of_asset  = userPositions[symbol]
+                if(userPositions_of_asset?.side === "short"){
+                    //reduce only order
+                    qtyToBeClose = Math.min(qty,userPositions_of_asset.qty)
+                    qtyToBeOpen -= qtyToBeClose;
+                }
+        }
             const sortedAskPrices = [...orderbook.asks.keys()].sort((a, b) => a - b)
 
             if (sortedAskPrices.length === 0) {
@@ -27,10 +39,16 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
             }
 
             let userUSDBalance = BALANCES.get(userId)!.USD
-            if (userUSDBalance!.available < margin) throw new Error("Available balance is low")
+            
+            let marginNeeded = margin * (qtyToBeOpen/qty)
 
-            userUSDBalance!.locked += margin
-            userUSDBalance!.available -= margin
+            if(qtyToBeOpen>0){
+                userUSDBalance!.locked += marginNeeded
+                userUSDBalance!.available -= marginNeeded
+            }   
+
+            
+            
 
             const bestAsk = sortedAskPrices[0]
             const maxPrice = bestAsk! * 1.05
@@ -60,9 +78,8 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
                     remainingQty -= minQtyCanBeFilled
                     restingOrder.filledQty += minQtyCanBeFilled
 
-                    const marginUsed = margin * (minQtyCanBeFilled / qty)
+                    const marginUsed = marginNeeded * (minQtyCanBeFilled / qty)
                     totalMarginUsed += marginUsed
-                    BALANCES.get(userId)!.USD!.locked -= marginUsed
 
                     if (restingOrder.filledQty === restingOrder.qty) {
                         restingOrder.status = "filled"
@@ -80,11 +97,14 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
                         createdAt
                     }
 
+                   
+
                     fills.push(fill)
                     FILLS.push(fill)
                     filledNotional += bestPrice * minQtyCanBeFilled
                     averagePrice = filledNotional / qty_filled_Sofar
                 }
+
 
                 const remainingAtLevel = bestOrders.filter(o => o.status !== "filled")
                 if (remainingAtLevel.length > 0) {
@@ -94,12 +114,33 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
                 }
             }
 
-            const filledQty = qty_filled_Sofar
-
             if (remainingQty > 0) {
-                userUSDBalance!.available += userUSDBalance!.locked
-                userUSDBalance!.locked = 0
+                const refundMargin = marginNeeded - totalMarginUsed
+                userUSDBalance!.available += refundMargin
+                userUSDBalance!.locked -= refundMargin
             }
+
+            const filledQty = qty_filled_Sofar
+            const actualClosedQty = Math.min(qtyToBeClose, filledQty);
+            const remainingOpenQty = filledQty - actualClosedQty;
+
+            if(userPositions){
+                let userPositions_of_asset= userPositions[symbol]
+                if(userPositions_of_asset?.side === "short"){
+                    let realisedPnl = (userPositions_of_asset.averagePrice - averagePrice) * actualClosedQty
+                    const marginToRelease = userPositions_of_asset.margin * (actualClosedQty / userPositions_of_asset.qty)
+                    userUSDBalance!.available += marginToRelease + realisedPnl
+                    userPositions_of_asset.realisedPnL += realisedPnl
+                    userPositions_of_asset.updatedAt = createdAt
+                    userPositions_of_asset.qty -= actualClosedQty
+                    userPositions_of_asset.margin -= marginToRelease
+                    if (userPositions_of_asset.qty === 0) {
+                         delete userPositions[symbol];
+                        }
+                }
+                    
+            }
+
 
             const orderRecord: OrderRecord = {
                 createdAt,
@@ -117,9 +158,11 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
 
             ORDERS.set(orderId, orderRecord)
 
-            if (filledQty > 0) {
-                const leverage = filledNotional / totalMarginUsed
+            if (remainingOpenQty > 0) {
+                const openQtyNotional = filledNotional * (remainingOpenQty / filledQty)
+                const leverage = openQtyNotional / totalMarginUsed
                 const liquidationPrice = averagePrice * (1 - 1 / leverage)
+
 
                 if (!POSITIONS.has(userId)) POSITIONS.set(userId, {})
                 const userPositions = POSITIONS.get(userId)!
@@ -130,7 +173,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
                         userId,
                         market: symbol,
                         side: "long",
-                        qty: qty_filled_Sofar,
+                        qty: remainingOpenQty,
                         averagePrice,
                         margin: totalMarginUsed,
                         leverage,
@@ -139,8 +182,8 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
                         updatedAt: createdAt
                     }
                 } else if (existing.side === "long") {
-                    const totalQty = existing.qty + filledQty
-                    const newAvg = (existing.averagePrice * existing.qty + averagePrice * filledQty) / totalQty
+                    const totalQty = existing.qty + remainingOpenQty
+                    const newAvg = (existing.averagePrice * existing.qty + averagePrice * remainingOpenQty) / totalQty
                     existing.averagePrice = newAvg
                     existing.qty = totalQty
                     existing.margin += totalMarginUsed
@@ -156,6 +199,40 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
 
     if(type === "market") {
         if(side === "sell"){
+            let qtyToBeOpen = qty;
+            let qtyToBeClose = 0;
+            const userPositions = POSITIONS.get(userId);
+            if(userPositions){
+                let userPositions_of_asset = userPositions[symbol]
+                if(userPositions_of_asset?.side === "long"){
+                    //reduce only order
+                    qtyToBeClose = Math.min(qty, userPositions_of_asset.qty)
+                    qtyToBeOpen -= qtyToBeClose
+                }
+            }
+
+            const sortedBidsPrices = [...orderbook.bids.keys()].sort((a,b)=>b-a)
+            const bestBid = sortedBidsPrices[0];
+            //sllipage calculation
+            const maxPrice = bestBid! * 1.05
+
+
+            
+
+            const userBalance = BALANCES.get(userId)
+            if(!userBalance) throw new Error("No entry of Balance")
+            const userUSDBalance = userBalance[symbol]
+            const marginNeeded = margin * (qtyToBeOpen/qty)
+
+            if(qtyToBeOpen > 0){
+                // margin lock
+                userUSDBalance!.available -= marginNeeded;
+                userUSDBalance!.locked += marginNeeded
+            }
+
+            
+
+
             
         }
     }
