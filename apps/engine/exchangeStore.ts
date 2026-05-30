@@ -57,6 +57,7 @@ export interface CreateOrderInput {
   price: number | null;
   qty: number;
   margin: number;
+  sllipage: number    
 }
 
 export interface Position {
