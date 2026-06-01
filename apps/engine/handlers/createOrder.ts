@@ -157,6 +157,67 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
       ORDERS.set(orderId, OrderRecord)
     }
 
+    const marginUsed = margin * (qtyFilledSoFar / qty)
+    const leverage = (averagePrice * qtyFilledSoFar )/ marginUsed
+    let userPositions = POSITIONS.get(userId)
+    
+    if(!userPositions){
+        userPositions={}
+        POSITIONS.set(userId,userPositions)
+    }
+    
+    let existingUserPosition = userPositions[symbol]
+    if(!existingUserPosition){
+        userPositions[symbol] = {
+            userId,
+            market: symbol,
+            side: "long",
+            qty: qtyFilledSoFar,
+            averagePrice,
+            margin: marginUsed,
+            leverage,
+            liquidationPrice:0,
+            realisedPnL: 0,
+            updatedAt : createdAt
+        }
+    } else if(existingUserPosition.side === "long"){
+        const totalQty = existingUserPosition.qty + qtyFilledSoFar
+        const totalCost = existingUserPosition.averagePrice * existingUserPosition.qty + totalCostofOrder
+
+        existingUserPosition.averagePrice = totalCost/totalQty
+        existingUserPosition.qty = totalQty,
+        existingUserPosition.margin += marginUsed
+        existingUserPosition.leverage = (existingUserPosition.averagePrice * existingUserPosition.qty)/ existingUserPosition.margin
+        existingUserPosition.updatedAt = createdAt
+    } else {
+        if( qtyFilledSoFar >= existingUserPosition.qty){
+            existingUserPosition.realisedPnL += existingUserPosition.qty * (existingUserPosition.averagePrice - averagePrice)
+            const remainingNewQty = qtyFilledSoFar - existingUserPosition.qty
+            delete userPositions[symbol]
+
+            if (remainingNewQty > 0) {
+              userPositions[symbol] = {
+                userId,
+                market: symbol,
+                side: "long",
+                qty: remainingNewQty,
+                averagePrice,
+                margin: marginUsed,
+                leverage,
+                liquidationPrice: 0,
+                realisedPnL: 0,
+                updatedAt: createdAt
+              }
+            }
+        } else {
+            existingUserPosition.realisedPnL += qtyFilledSoFar * (existingUserPosition.averagePrice - averagePrice)
+            existingUserPosition.qty -= qtyFilledSoFar
+            existingUserPosition.margin -= marginUsed
+            existingUserPosition.leverage = (existingUserPosition.averagePrice * existingUserPosition.qty) / existingUserPosition.margin
+            existingUserPosition.updatedAt = createdAt
+        }
+    }
+
   }
 
   if (side === "sell") {
@@ -296,6 +357,67 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
             createdAt
         }
         ORDERS.set(orderId, OrderRecord)
+    }
+
+    const marginUsedSell = margin * (qtyFilledSoFar / qty)
+    const leverageSell = (averagePrice * qtyFilledSoFar) / marginUsedSell
+    let userPositionsSell = POSITIONS.get(userId)
+
+    if (!userPositionsSell) {
+      userPositionsSell = {}
+      POSITIONS.set(userId, userPositionsSell)
+    }
+
+    let existingUserPositionSell = userPositionsSell[symbol]
+    if (!existingUserPositionSell) {
+      userPositionsSell[symbol] = {
+        userId,
+        market: symbol,
+        side: "short",
+        qty: qtyFilledSoFar,
+        averagePrice,
+        margin: marginUsedSell,
+        leverage: leverageSell,
+        liquidationPrice: 0,
+        realisedPnL: 0,
+        updatedAt: createdAt
+      }
+    } else if (existingUserPositionSell.side === "short") {
+      const totalQty = existingUserPositionSell.qty + qtyFilledSoFar
+      const totalCost = existingUserPositionSell.averagePrice * existingUserPositionSell.qty + totoalCostOfOrder
+
+      existingUserPositionSell.averagePrice = totalCost / totalQty
+      existingUserPositionSell.qty = totalQty
+      existingUserPositionSell.margin += marginUsedSell
+      existingUserPositionSell.leverage = (existingUserPositionSell.averagePrice * existingUserPositionSell.qty) / existingUserPositionSell.margin
+      existingUserPositionSell.updatedAt = createdAt
+    } else {
+      if (qtyFilledSoFar >= existingUserPositionSell.qty) {
+        existingUserPositionSell.realisedPnL += existingUserPositionSell.qty * (averagePrice - existingUserPositionSell.averagePrice)
+        const remainingNewQtySell = qtyFilledSoFar - existingUserPositionSell.qty
+        delete userPositionsSell[symbol]
+
+        if (remainingNewQtySell > 0) {
+          userPositionsSell[symbol] = {
+            userId,
+            market: symbol,
+            side: "short",
+            qty: remainingNewQtySell,
+            averagePrice,
+            margin: marginUsedSell,
+            leverage: leverageSell,
+            liquidationPrice: 0,
+            realisedPnL: 0,
+            updatedAt: createdAt
+          }
+        }
+      } else {
+        existingUserPositionSell.realisedPnL += qtyFilledSoFar * (averagePrice - existingUserPositionSell.averagePrice)
+        existingUserPositionSell.qty -= qtyFilledSoFar
+        existingUserPositionSell.margin -= marginUsedSell
+        existingUserPositionSell.leverage = (existingUserPositionSell.averagePrice * existingUserPositionSell.qty) / existingUserPositionSell.margin
+        existingUserPositionSell.updatedAt = createdAt
+      }
     }
 
   }
