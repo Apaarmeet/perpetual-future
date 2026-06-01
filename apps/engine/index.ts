@@ -1,12 +1,13 @@
 import type { EngineRequest } from "./exchangeStore"
 import { handleCreateOrder } from "./handlers/createOrder"
+import { handleCancelOrder } from "./handlers/cancelOrder"
 
 function handleEngineRequest(message: EngineRequest) {
     switch (message.type) {
         case "create-order":
             return handleCreateOrder(message.payload)
         case "cancel-order":
-            throw new Error("cancel-order not implemented")
+            return handleCancelOrder(message.payload)
         case "get-depth":
             throw new Error("get-depth not implemented")
         case "get-user-balance":

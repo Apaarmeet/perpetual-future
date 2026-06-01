@@ -18,6 +18,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
 
   const orderId = crypto.randomUUID()
   const createdAt = Date.now()
+  let OrderRecord: OrderRecord = null as any
 
   if (side === "buy") {
     const sortedBestAskPrices = [...orderbook.asks.keys()].sort((a, b) => a - b)
@@ -54,10 +55,10 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
 
 
     for (const bestPrice of sortedBestAskPrices) {
-        if (remainingQty < 0) break;
+        if (remainingQty <= 0) break;
         
         //check if the best price that gets are less then the max price
-      if (bestPrice > maxPrice) throw new Error(type === "market" ? "all orders are past the sllipage" : " all orders are past the limit price ")
+      if (bestPrice > maxPrice) break
 
       // now we get all the bestorders of the bestprice
 
@@ -65,7 +66,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
       if (!bestOrders) throw new Error("No liquidity Available")
 
       for (const RestingOrder of bestOrders) {
-        if (remainingQty < 0) break;
+        if (remainingQty <= 0) break;
 
         const remainiingQtyInRestingOrder = RestingOrder.qty - RestingOrder.filledQty;
         const minQtyCanbeFilled = Math.min(remainingQty, remainiingQtyInRestingOrder)
@@ -98,30 +99,31 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
 
       }
 
-    }
-
-    if (remainingQty > 0) {
-      if (type === "market") {
-        throw new Error("Insufficient Liquidity to fill all the qty")
-      } else if (type === "limit") {
-        orderbook.bids.set(maxPrice, [
-          ...(orderbook.bids.get(maxPrice) || []), {
-            orderId,
-            userId,
-            side,
-            type,
-            symbol,
-            price: maxPrice,
-            qty,
-            filledQty: qty - remainingQty,
-            status: "open",
-            createdAt
-          }
-        ])
+      const remainingAtLevel = bestOrders.filter((o) => o.filledQty < o.qty)
+      if (remainingAtLevel.length > 0) {
+        orderbook.asks.set(bestPrice, remainingAtLevel)
+      } else {
+        orderbook.asks.delete(bestPrice)
       }
+
     }
 
-    let OrderRecord: OrderRecord
+    if (remainingQty > 0 && type === "limit") {
+      orderbook.bids.set(maxPrice, [
+        ...(orderbook.bids.get(maxPrice) || []), {
+          orderId,
+          userId,
+          side,
+          type,
+          symbol,
+          price: maxPrice,
+          qty,
+          filledQty: qty - remainingQty,
+          status: "open",
+          createdAt
+        }
+      ])
+    }
 
     if (type === "limit") {
       OrderRecord = {
@@ -133,6 +135,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
         price: maxPrice,
         qty,
         filledQty: qtyFilledSoFar,
+        margin,
         status: remainingQty === 0 ? "filled" : remainingQty < qty ? "partially_filled" : "open",
         fills,
         createdAt
@@ -150,14 +153,24 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
         price: maxPrice,
         qty,
         filledQty: qtyFilledSoFar,
-        status: remainingQty === 0 ? "filled" : remainingQty < qty ? "partially_filled" : "open",
+        margin,
+        status: remainingQty === 0 ? "filled" : remainingQty < qty ? "partially_filled" : "cancelled",
         fills,
         createdAt
       }
       ORDERS.set(orderId, OrderRecord)
     }
 
+    if (qtyFilledSoFar === 0) {
+      if (type === "market") {
+        userAssetbalance.locked -= margin
+        userAssetbalance.available += margin
+      }
+      return OrderRecord
+    }
+
     const marginUsed = margin * (qtyFilledSoFar / qty)
+    let marginForPosition = marginUsed
     const leverage = (averagePrice * qtyFilledSoFar )/ marginUsed
     let userPositions = POSITIONS.get(userId)
     
@@ -190,32 +203,49 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
         existingUserPosition.leverage = (existingUserPosition.averagePrice * existingUserPosition.qty)/ existingUserPosition.margin
         existingUserPosition.updatedAt = createdAt
     } else {
-        if( qtyFilledSoFar >= existingUserPosition.qty){
-            existingUserPosition.realisedPnL += existingUserPosition.qty * (existingUserPosition.averagePrice - averagePrice)
+        const closedQty = Math.min(qtyFilledSoFar, existingUserPosition.qty)
+        const marginToRelease = existingUserPosition.margin * (closedQty / existingUserPosition.qty)
+        const pnl = closedQty * (existingUserPosition.averagePrice - averagePrice)
+        existingUserPosition.realisedPnL += pnl
+
+        userAssetbalance.locked -= marginToRelease
+        userAssetbalance.available += marginToRelease + pnl
+
+        if (qtyFilledSoFar >= existingUserPosition.qty) {
             const remainingNewQty = qtyFilledSoFar - existingUserPosition.qty
             delete userPositions[symbol]
 
             if (remainingNewQty > 0) {
-              userPositions[symbol] = {
-                userId,
-                market: symbol,
-                side: "long",
-                qty: remainingNewQty,
-                averagePrice,
-                margin: marginUsed,
-                leverage,
-                liquidationPrice: 0,
-                realisedPnL: 0,
-                updatedAt: createdAt
-              }
+                const marginForNewPosition = margin * (remainingNewQty / qty)
+                marginForPosition = marginForNewPosition
+                userPositions[symbol] = {
+                  userId,
+                  market: symbol,
+                  side: "long",
+                  qty: remainingNewQty,
+                  averagePrice,
+                  margin: marginForNewPosition,
+                  leverage: (averagePrice * remainingNewQty) / marginForNewPosition,
+                  liquidationPrice: 0,
+                  realisedPnL: 0,
+                  updatedAt: createdAt
+                }
+            } else {
+                marginForPosition = 0
             }
         } else {
-            existingUserPosition.realisedPnL += qtyFilledSoFar * (existingUserPosition.averagePrice - averagePrice)
-            existingUserPosition.qty -= qtyFilledSoFar
-            existingUserPosition.margin -= marginUsed
+            existingUserPosition.qty -= closedQty
+            existingUserPosition.margin -= marginToRelease
             existingUserPosition.leverage = (existingUserPosition.averagePrice * existingUserPosition.qty) / existingUserPosition.margin
             existingUserPosition.updatedAt = createdAt
+            marginForPosition = 0
         }
+    }
+
+    const unusedMargin = margin - marginForPosition
+    if (unusedMargin > 0) {
+      userAssetbalance.locked -= unusedMargin
+      userAssetbalance.available += unusedMargin
     }
 
   }
@@ -231,7 +261,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
         throw new Error("User Wallet not initialised")
     }
     if(userAssetbalance.available < margin){
-        throw new Error("Insifficient Balance")
+        throw new Error("Insufficient Balance")
     }
    
     let minSellPrice = 0
@@ -258,16 +288,16 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
 
     for(const bestprice of sortedBestBidsPrices){
         
-        if (remainingQty < 0) break;
+        if (remainingQty <= 0) break;
 
-        if(bestprice < minSellPrice) throw new Error(type === "market" ? "All orders are past the sllipage" : "All orders are past limit price");
+        if(bestprice < minSellPrice) break
 
 
         const bestOrders = orderbook.bids.get(bestprice);
         if (!bestOrders) throw new Error("No liquidity Available")
 
         for(const RestingOrder of bestOrders){
-            if(remainingQty < 0) break
+            if(remainingQty <= 0) break
 
             const remainiingQtyInRestingOrder = RestingOrder.qty - RestingOrder.filledQty;
             const minQtyCanbeFilled = Math.min(remainingQty, remainiingQtyInRestingOrder)
@@ -299,31 +329,30 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
             }
 
         }
+
+        const remainingAtLevelSell = bestOrders.filter((o) => o.filledQty < o.qty)
+        if (remainingAtLevelSell.length > 0) {
+          orderbook.bids.set(bestprice, remainingAtLevelSell)
+        } else {
+          orderbook.bids.delete(bestprice)
+        }
+
     }
 
-    if(type === "market"){
-                if (remainingQty > 0) {
-                    throw new Error("Insufficient Liquidity to fill all the qty")
-                }
-            } else if( type === "limit"){
-                if(remainingQty > 0){
-                    orderbook.asks.set(minSellPrice, [...(orderbook.asks.get(minSellPrice) || []),{
-                        orderId,
-                        userId,
-                        side,
-                        type,
-                        symbol,
-                        price: minSellPrice,
-                        qty,
-                        filledQty: qty - remainingQty,
-                        status: "open",
-                        createdAt
-                    }
-                ])
-                }
-            }
-
-    let OrderRecord: OrderRecord
+    if (remainingQty > 0 && type === "limit") {
+      orderbook.asks.set(minSellPrice, [...(orderbook.asks.get(minSellPrice) || []), {
+        orderId,
+        userId,
+        side,
+        type,
+        symbol,
+        price: minSellPrice,
+        qty,
+        filledQty: qty - remainingQty,
+        status: "open",
+        createdAt
+        }])
+    }
 
     if( type === "limit") {
         OrderRecord = {
@@ -335,6 +364,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
             price: minSellPrice,
             qty,
             filledQty: qtyFilledSoFar,
+            margin,
             status: remainingQty === 0 ? "filled" : remainingQty < qty ? "partially_filled" : "open",
             fills,
             createdAt
@@ -352,14 +382,24 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
             price : minSellPrice,
             qty,
             filledQty : qtyFilledSoFar,
-            status: remainingQty === 0 ? "filled" : remainingQty < qty ? "partially_filled" : "open",
+            margin,
+            status: remainingQty === 0 ? "filled" : remainingQty < qty ? "partially_filled" : "cancelled",
             fills,
             createdAt
         }
         ORDERS.set(orderId, OrderRecord)
     }
 
+    if (qtyFilledSoFar === 0) {
+      if (type === "market") {
+        userAssetbalance.locked -= margin
+        userAssetbalance.available += margin
+      }
+      return OrderRecord
+    }
+
     const marginUsedSell = margin * (qtyFilledSoFar / qty)
+    let marginForPositionSell = marginUsedSell
     const leverageSell = (averagePrice * qtyFilledSoFar) / marginUsedSell
     let userPositionsSell = POSITIONS.get(userId)
 
@@ -392,34 +432,52 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
       existingUserPositionSell.leverage = (existingUserPositionSell.averagePrice * existingUserPositionSell.qty) / existingUserPositionSell.margin
       existingUserPositionSell.updatedAt = createdAt
     } else {
+      const closedQtySell = Math.min(qtyFilledSoFar, existingUserPositionSell.qty)
+      const marginToReleaseSell = existingUserPositionSell.margin * (closedQtySell / existingUserPositionSell.qty)
+      const pnlSell = closedQtySell * (averagePrice - existingUserPositionSell.averagePrice)
+      existingUserPositionSell.realisedPnL += pnlSell
+
+      userAssetbalance.locked -= marginToReleaseSell
+      userAssetbalance.available += marginToReleaseSell + pnlSell
+
       if (qtyFilledSoFar >= existingUserPositionSell.qty) {
-        existingUserPositionSell.realisedPnL += existingUserPositionSell.qty * (averagePrice - existingUserPositionSell.averagePrice)
         const remainingNewQtySell = qtyFilledSoFar - existingUserPositionSell.qty
         delete userPositionsSell[symbol]
 
         if (remainingNewQtySell > 0) {
+            const marginForNewPosition = margin * (remainingNewQtySell / qty)
+            marginForPositionSell = marginForNewPosition
           userPositionsSell[symbol] = {
             userId,
             market: symbol,
             side: "short",
             qty: remainingNewQtySell,
             averagePrice,
-            margin: marginUsedSell,
-            leverage: leverageSell,
+            margin: marginForNewPosition,
+            leverage: (averagePrice * remainingNewQtySell) / marginForNewPosition,
             liquidationPrice: 0,
             realisedPnL: 0,
             updatedAt: createdAt
           }
+        } else {
+          marginForPositionSell = 0
         }
       } else {
-        existingUserPositionSell.realisedPnL += qtyFilledSoFar * (averagePrice - existingUserPositionSell.averagePrice)
-        existingUserPositionSell.qty -= qtyFilledSoFar
-        existingUserPositionSell.margin -= marginUsedSell
+        existingUserPositionSell.qty -= closedQtySell
+        existingUserPositionSell.margin -= marginToReleaseSell
         existingUserPositionSell.leverage = (existingUserPositionSell.averagePrice * existingUserPositionSell.qty) / existingUserPositionSell.margin
         existingUserPositionSell.updatedAt = createdAt
+        marginForPositionSell = 0
       }
+    }
+
+    const unusedMarginSell = margin - marginForPositionSell
+    if (unusedMarginSell > 0) {
+      userAssetbalance.locked -= unusedMarginSell
+      userAssetbalance.available += unusedMarginSell
     }
 
   }
 
+  return OrderRecord
 }

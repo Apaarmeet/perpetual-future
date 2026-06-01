@@ -38,6 +38,7 @@ export interface OrderRecord {
   price: number | null;
   qty: number;
   filledQty: number;
+  margin: number;
   status: OrderStatus;
   fills: Fill[];
   createdAt: number;
