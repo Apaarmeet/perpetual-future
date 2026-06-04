@@ -3,6 +3,9 @@ import { handleCreateOrder } from "./handlers/createOrder"
 import { handleCancelOrder } from "./handlers/cancelOrder"
 import {  handleGetDepth } from "./handlers/getDepth"
 import { handleGetUserBalance } from "./handlers/getUserBalance"
+import { handleGetOrder } from "./handlers/getOrder"
+import { handleGetPosition } from "./handlers/getPosition"
+import { handleGetUserPosition } from "./handlers/getuserPosition"
 
 function handleEngineRequest(message: EngineRequest) {
     switch (message.type) {
@@ -15,11 +18,11 @@ function handleEngineRequest(message: EngineRequest) {
         case "get-user-balance":
             return handleGetUserBalance(message.payload)
         case "get-order":
-            throw new Error("get-order not implemented")
+            return handleGetOrder(message.payload)
         case "get-position":
-            throw new Error("get-position not implemented")
+            return handleGetPosition(message.payload)
         case "get-user-position":
-            throw new Error("get-user-position not implemented")
+            return handleGetUserPosition(message.payload)
         default:
             throw new Error(`Unknown command type`)
     }

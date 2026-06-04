@@ -69,8 +69,21 @@ export interface CreateOrderInput {
 export interface getUserBalanceInput {
   userId: string
 }
+
+export interface getOrderInput {
+  userId: string;
+  orderId: string;
+}
+
+export interface getPositionInput {
+  userId: string
+  symbol: string
+}
+export interface getUserPositionInput {
+  userId: string
+}
 export interface getDepthInput {
-  symbol: string,
+  symbol: string
   limit: number
 }
 
