@@ -1,6 +1,7 @@
 import type { EngineRequest } from "./exchangeStore"
 import { handleCreateOrder } from "./handlers/createOrder"
 import { handleCancelOrder } from "./handlers/cancelOrder"
+import {  handleGetDepth } from "./handlers/getDepth"
 
 function handleEngineRequest(message: EngineRequest) {
     switch (message.type) {
@@ -9,7 +10,7 @@ function handleEngineRequest(message: EngineRequest) {
         case "cancel-order":
             return handleCancelOrder(message.payload)
         case "get-depth":
-            throw new Error("get-depth not implemented")
+            return handleGetDepth(message.payload)
         case "get-user-balance":
             throw new Error("get-user-balance not implemented")
         case "get-order":

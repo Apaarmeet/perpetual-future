@@ -7,6 +7,11 @@ export interface Balance {
   locked: number;
 }
 
+export interface depth {
+  price: number,
+  qty: number
+}
+
 export interface RestingOrder {
   orderId: string;
   userId: string;
@@ -59,6 +64,11 @@ export interface CreateOrderInput {
   qty: number;
   margin: number;
   sllipage: number    
+}
+
+export interface getDepthInput {
+  symbol: string,
+  limit: number
 }
 
 export interface Position {
