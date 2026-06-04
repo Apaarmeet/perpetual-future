@@ -66,6 +66,9 @@ export interface CreateOrderInput {
   sllipage: number    
 }
 
+export interface getUserBalanceInput {
+  userId: string
+}
 export interface getDepthInput {
   symbol: string,
   limit: number
