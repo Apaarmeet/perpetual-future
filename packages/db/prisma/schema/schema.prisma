@@ -5,6 +5,64 @@ generator client {
   runtime = "bun"
 }
 
+model User {
+  id  String  @id @default(uuid()) @db.Uuid
+  email String @unique
+  name String 
+  password String
+
+  orders Order[]
+}
+
+model Order {
+  orderId String @id @default(uuid()) @db.Uuid
+  userId String   @db.Uuid
+  user  User    @relation( fields: [userId], references:[id])
+  side Side
+  type OrderType 
+  price Decimal?
+  qty   Decimal
+  filledQty Decimal  @default(0)
+  margin    Decimal
+  Status OrderStatus
+  createdAt DateTime
+
+  buyFills Fill[]   @relation("buyOrderFills")
+  sellFills Fill[]   @relation("sellOrderFills")
+}
+
+model Fill {
+  fillId  String @id @default(uuid()) @db.Uuid
+  symbol  String
+  price   Decimal
+  qty     Decimal
+  buyOrderId  String @db.Uuid
+  sellOrderId String @db.Uuid 
+  createdAt   DateTime 
+
+  buyOrder  Order   @relation("buyOrderFills", fields: [buyOrderId], references: [orderId] )
+  sellOrder  Order   @relation("sellOrderFills", fields: [sellOrderId], references: [orderId] )
+  
+}
+
+enum OrderStatus {
+  open
+  partially_filled
+  filled
+  cancelled
+}
+
+
+
+enum OrderType {
+  market
+  limit
+}
+
+enum Side {
+  buy
+  sell
+}
 datasource db {
   provider = "postgresql"
 }

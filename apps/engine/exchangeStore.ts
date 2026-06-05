@@ -87,6 +87,12 @@ export interface getDepthInput {
   limit: number
 }
 
+export interface onRampInput {
+  userId : string;
+  symbol: string;
+  amount: number;
+}
+
 export interface Position {
     userId: string,
     market: string,
@@ -114,6 +120,7 @@ export type EngineCommandType =
     | "cancel-order"
     | "get-position"
     | "get-user-position"
+    | "onRamp"
 
 export interface EngineRequest {
     correlationId: string,

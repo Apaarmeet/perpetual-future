@@ -6,9 +6,12 @@ import { handleGetUserBalance } from "./handlers/getUserBalance"
 import { handleGetOrder } from "./handlers/getOrder"
 import { handleGetPosition } from "./handlers/getPosition"
 import { handleGetUserPosition } from "./handlers/getuserPosition"
+import { handleOnRamp } from "./handlers/onRamp"
 
 function handleEngineRequest(message: EngineRequest) {
     switch (message.type) {
+        case "onRamp" :
+            return handleOnRamp(message.payload)
         case "create-order":
             return handleCreateOrder(message.payload)
         case "cancel-order":
