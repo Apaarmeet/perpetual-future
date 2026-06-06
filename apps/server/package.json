@@ -12,6 +12,8 @@
   "dependencies": {
     "@perps-turbo-repo/db": "workspace:*",
     "@perps-turbo-repo/env": "workspace:*",
+    "@types/bcrypt": "^6.0.0",
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "catalog:",
     "express": "^5.1.0",
