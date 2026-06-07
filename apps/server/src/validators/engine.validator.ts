@@ -24,6 +24,5 @@ export const getDepthSchema = z.object({
 
 export const onRampSchema = z.object({
     userId: z.string(),
-    symbol: z.string(),
     amount: z.number().positive(),
 })
