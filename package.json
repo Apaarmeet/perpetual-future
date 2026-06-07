@@ -39,7 +39,9 @@
   },
   "dependencies": {
     "@perps-turbo-repo/env": "workspace:*",
+    "@types/redis": "^4.0.11",
     "dotenv": "catalog:",
+    "redis": "^6.0.0",
     "zod": "catalog:"
   },
   "devDependencies": {

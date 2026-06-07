@@ -11,12 +11,15 @@
   },
   "dependencies": {
     "@perps-turbo-repo/db": "workspace:*",
+    "@repo/redis": "workspace:*",
     "@perps-turbo-repo/env": "workspace:*",
     "@types/bcrypt": "^6.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
-    "dotenv": "catalog:",
+    "dotenv": "^17.4.2",
     "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.3",
     "zod": "catalog:"
   },
   "devDependencies": {

@@ -1,0 +1,17 @@
+{
+  "name": "@repo/redis",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "exports": {
+    ".": {
+      "default": "./client.ts"
+    }
+},
+  "peerDependencies": {
+    "typescript": "^5"
+    
+    }
+
+}
