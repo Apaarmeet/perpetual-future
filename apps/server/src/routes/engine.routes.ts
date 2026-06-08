@@ -1,7 +1,6 @@
-import { createOrderSchema, onRampSchema } from "@/validators/engine.validator";
-import { request, Router} from "express";
+import { cancelOrderSchema, createOrderSchema, onRampSchema } from "@/validators/engine.validator";
+import { Router} from "express";
 import {client, connectionRedis} from "@repo/redis"
-import { resolve } from "bun";
 
 
 
@@ -99,7 +98,7 @@ engineRouter.post("/onramp",async (req, res) => {
 })
 
 
-engineRouter.post("/order", (req, res) => {
+engineRouter.post("/order", async (req, res) => {
     const body = req.body
     const user = req.user;
 
@@ -144,7 +143,43 @@ engineRouter.post("/order", (req, res) => {
 
 
 })
-engineRouter.delete("/order", (req, res) => {})
+engineRouter.delete("/order", async (req, res) => {
+   const body =  req.body;
+   const user = req.user;
+
+   const verify = cancelOrderSchema.safeParse(body)
+   if(!verify.success){
+    return res.status(401).json({
+        error:"Invalid Input"
+    })
+   }
+   const data = verify.data;
+   const correlationId = crypto.randomUUID()
+
+   const engineRequest = new Promise((resolve)=>{
+        pendingRequest.set(
+            correlationId,
+            resolve
+        )
+   })
+
+   await client.xAdd(
+    "engine:request",
+    "*",
+    {
+        correlationId,
+        responseTo: `response:${backendId}`,
+        userId: user.id,
+        orderId: data.orderId,
+    }
+   )
+
+   const response = await engineRequest
+
+   return res.json({
+    response
+   })
+})
 engineRouter.get("/equity/available", (req, res) => {})
 engineRouter.get("/positions/open/:marketId", (req, res) => {});
 engineRouter.get("/positions/closed/:marketId", (req, res) => {});
