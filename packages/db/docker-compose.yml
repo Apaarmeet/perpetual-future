@@ -19,5 +19,12 @@ services:
       retries: 5
     restart: unless-stopped
 
+  redis:
+    image: redis:alpine
+    container_name: perps-turbo-repo-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
 volumes:
   perps-turbo-repo_postgres_data:

@@ -1,12 +1,10 @@
 {
-  "name": "engine",
+  "name": "db-puller",
   "type": "module",
   "main": "index.ts",
   "scripts": {
     "build": "tsdown",
     "check-types": "tsc -b",
-    "test": "bun test",
-    "compile": "bun build --compile --minify --sourcemap --bytecode ./index.ts --outfile server",
     "dev": "bun run --hot index.ts",
     "start": "bun run index.ts"
   },
@@ -14,16 +12,11 @@
     "@perps-turbo-repo/db": "workspace:*",
     "@perps-turbo-repo/env": "workspace:*",
     "@repo/redis": "workspace:*",
-    "cors": "^2.8.5",
-    "dotenv": "catalog:",
-    "express": "^5.1.0",
-    "zod": "catalog:"
+    "dotenv": "catalog:"
   },
   "devDependencies": {
     "@perps-turbo-repo/config": "workspace:*",
     "@types/bun": "catalog:",
-    "@types/cors": "^2.8.17",
-    "@types/express": "^5.0.1",
     "tsdown": "^0.21.9",
     "typescript": "catalog:"
   }

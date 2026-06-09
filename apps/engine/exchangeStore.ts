@@ -1,3 +1,18 @@
+import { client, connectionRedis } from "@repo/redis";
+import { createClient } from "redis";
+import { env } from "@perps-turbo-repo/env/server";
+
+// Dedicated write client — never used for blocking reads
+// so it is always free to xAdd/publish immediately
+export const writeClient = createClient({ url: env.REDIS_URL });
+writeClient.on("error", (err) => console.error("[Engine WriteClient] Redis Error", err));
+
+export async function connectWriteClient() {
+  if (!writeClient.isOpen) {
+    await writeClient.connect();
+  }
+}
+
 export type Side = "buy" | "sell";
 export type OrderType = "market" | "limit";
 export type OrderStatus = "open" | "partially_filled" | "filled" | "cancelled";
@@ -72,7 +87,7 @@ export interface getUserBalanceInput {
 
 export interface getOrderInput {
   userId: string;
-  orderId: string;
+  symbol: string;
 }
 
 export interface getPositionInput {
@@ -121,6 +136,10 @@ export type EngineCommandType =
     | "get-position"
     | "get-user-position"
     | "onRamp"
+    | "get-open-orders"
+    | "get-orders"
+    | "get-fills"
+    | "price-update"
 
 export interface EngineRequest {
     correlationId: string,
@@ -133,5 +152,31 @@ export const ORDERBOOKS = new Map<string, OrderBook>();
 export const POSITIONS = new Map<string, Record<string, Position>>();
 export const ORDERS = new Map<string, OrderRecord>();
 export const FILLS: Fill[] = [];
+export const SPOT_PRICES = new Map<string, number>();
+
+export function calculateLiquidationPrice(
+    side: "long" | "short",
+    averagePrice: number,
+    qty: number,
+    margin: number
+): number {
+    if (qty <= 0) return 0;
+    if (side === "long") {
+        return Math.max(0, averagePrice - margin / qty);
+    } else {
+        return Math.max(0, averagePrice + margin / qty);
+    }
+}
+
+export async function publishDbEvent(type: "trade-event" | "order-update", data: any): Promise<void> {
+    try {
+        await writeClient.xAdd("db:events", "*", {
+            type,
+            data: JSON.stringify(data)
+        });
+    } catch (err) {
+        console.error("Failed to publish DB event:", err);
+    }
+}
 
 

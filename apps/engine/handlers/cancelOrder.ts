@@ -1,6 +1,7 @@
 import {
   BALANCES, ORDERBOOKS, ORDERS,
-  type OrderRecord
+  type OrderRecord,
+  publishDbEvent
 } from "../exchangeStore"
 
 export function handleCancelOrder(payload: Record<string, unknown>) {
@@ -37,6 +38,10 @@ export function handleCancelOrder(payload: Record<string, unknown>) {
   }
 
   order.status = "cancelled"
+
+  publishDbEvent("order-update", order).catch((err) => {
+    console.error("Failed to publish cancel event:", err);
+  });
 
   return order
 }

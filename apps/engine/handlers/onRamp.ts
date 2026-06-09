@@ -3,6 +3,10 @@ import { BALANCES, type onRampInput } from "../exchangeStore";
 export function handleOnRamp(message: Record<string, unknown>){
     const {userId, symbol, amount} = message as unknown as onRampInput
 
+    if (amount <= 0) {
+        throw new Error("Amount must be positive")
+    }
+
     let userBalance = BALANCES.get(userId)
 
     if(!userBalance){

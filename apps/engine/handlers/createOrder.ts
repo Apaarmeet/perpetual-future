@@ -1,54 +1,58 @@
 import {
   BALANCES, FILLS, ORDERBOOKS, ORDERS, POSITIONS,
-  type CreateOrderInput, type Fill, type OrderRecord, type RestingOrder
+  type CreateOrderInput, type Fill, type OrderRecord, type RestingOrder,
+  calculateLiquidationPrice,
+  publishDbEvent
 } from "../exchangeStore"
 
 function applyPositionFill(userId: string, symbol: string, side: "buy" | "sell", fillQty: number, fillPrice: number, marginUsed: number, createdAt: number) {
-  const userAssetbalance = BALANCES.get(userId)?.[symbol]
+  // Balances are always stored under "USD" (collateral currency for perpetuals)
+  const userAssetbalance = BALANCES.get(userId)?.["USD"]
 
   let userPosition = POSITIONS.get(userId)
-  if(!userPosition){
+  if (!userPosition) {
     userPosition = {};
-    POSITIONS.set(userId,userPosition);
+    POSITIONS.set(userId, userPosition);
   }
 
   const postionSide = side === "buy" ? "long" : "short"
   const oppositeSide = side === "buy" ? "short" : "long"
   const existingUserPosition = userPosition[symbol]
 
-  if(!existingUserPosition){
+  if (!existingUserPosition) {
     userPosition[symbol] = {
       userId,
       market: symbol,
       side: postionSide,
       qty: fillQty,
       averagePrice: fillPrice,
-      margin:marginUsed,
+      margin: marginUsed,
       leverage: (fillPrice * fillQty) / marginUsed,
-      liquidationPrice: 0,
+      liquidationPrice: calculateLiquidationPrice(postionSide, fillPrice, fillQty, marginUsed),
       realisedPnL: 0,
-      updatedAt:createdAt
-      
+      updatedAt: createdAt
+
     }
-    return ;
+    return;
   }
 
-  if(existingUserPosition.side === postionSide) {
+  if (existingUserPosition.side === postionSide) {
     const totalQty = existingUserPosition.qty + fillQty
-    const totalCost = existingUserPosition.averagePrice * existingUserPosition.qty  + fillPrice * fillQty
+    const totalCost = existingUserPosition.averagePrice * existingUserPosition.qty + fillPrice * fillQty
 
-    existingUserPosition.averagePrice = totalCost/totalQty
+    existingUserPosition.averagePrice = totalCost / totalQty
     existingUserPosition.qty = totalQty
     existingUserPosition.margin += marginUsed
     existingUserPosition.leverage = (existingUserPosition.averagePrice * existingUserPosition.qty) / existingUserPosition.margin
+    existingUserPosition.liquidationPrice = calculateLiquidationPrice(existingUserPosition.side, existingUserPosition.averagePrice, existingUserPosition.qty, existingUserPosition.margin)
     existingUserPosition.updatedAt = createdAt
 
     return;
   }
 
-  if(existingUserPosition.side === oppositeSide){
+  if (existingUserPosition.side === oppositeSide) {
     const closedQty = Math.min(fillQty, existingUserPosition.qty);
-    const marginToRelease = existingUserPosition.margin * (closedQty/ existingUserPosition.qty)
+    const marginToRelease = existingUserPosition.margin * (closedQty / existingUserPosition.qty)
 
     const pnl = side === "buy" ? closedQty * (existingUserPosition.averagePrice - fillPrice) : closedQty * (fillPrice - existingUserPosition.averagePrice)
     existingUserPosition.realisedPnL += pnl
@@ -69,7 +73,7 @@ function applyPositionFill(userId: string, symbol: string, side: "buy" | "sell",
           averagePrice: fillPrice,
           margin: marginForNewPosition,
           leverage: (fillPrice * remainingNewQty) / marginForNewPosition,
-          liquidationPrice: 0,
+          liquidationPrice: calculateLiquidationPrice(postionSide, fillPrice, remainingNewQty, marginForNewPosition),
           realisedPnL: 0,
           updatedAt: createdAt
         }
@@ -78,13 +82,14 @@ function applyPositionFill(userId: string, symbol: string, side: "buy" | "sell",
       existingUserPosition.qty -= closedQty
       existingUserPosition.margin -= marginToRelease
       existingUserPosition.leverage = (existingUserPosition.averagePrice * existingUserPosition.qty) / existingUserPosition.margin
+      existingUserPosition.liquidationPrice = calculateLiquidationPrice(existingUserPosition.side, existingUserPosition.averagePrice, existingUserPosition.qty, existingUserPosition.margin)
       existingUserPosition.updatedAt = createdAt
     }
   }
 
 }
 
-  
+
 
 
 
@@ -92,6 +97,15 @@ function applyPositionFill(userId: string, symbol: string, side: "buy" | "sell",
 
 export function handleCreateOrder(payload: Record<string, unknown>) {
   const { userId, type, side, symbol, price, qty, margin, sllipage } = payload as unknown as CreateOrderInput
+  const updatedOrderIds = new Set<string>();
+  const fills: Fill[] = [];
+
+  if (qty <= 0) throw new Error("Quantity must be positive")
+  if (margin <= 0) throw new Error("Margin must be positive")
+  if (sllipage <= 0) throw new Error("Slippage must be positive")
+  if (type === "limit" && (price === null || price === undefined || price <= 0)) {
+    throw new Error("Price must be positive for limit orders")
+  }
 
   let orderbook = ORDERBOOKS.get(symbol)
   if (!orderbook) {
@@ -107,6 +121,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
   const createdAt = Date.now()
   let OrderRecord: OrderRecord = null as any
 
+  // main logic start ethe hunda hai buy side da 
   if (side === "buy") {
     const sortedBestAskPrices = [...orderbook.asks.keys()].sort((a, b) => a - b)
     const BestAsk = sortedBestAskPrices[0]
@@ -120,7 +135,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
 
     let maxPrice = 0
     if (type == "market") {
-      maxPrice = ((sllipage / 100) * BestAsk! + (BestAsk!))  // sllipage calculation
+      maxPrice = BestAsk !== undefined ? ((sllipage / 100) * BestAsk + BestAsk) : 0  // sllipage calculation
       userAssetbalance.available -= margin; //balance lock for market
       userAssetbalance.locked += margin
 
@@ -133,7 +148,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
       userAssetbalance.locked += margin
     }
 
-    const fills: Fill[] = []
+    
     let fill: Fill
     let remainingQty = qty;
     let qtyFilledSoFar = 0
@@ -190,6 +205,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
           } else {
             makerOrder.status = "filled"
           }
+          updatedOrderIds.add(makerOrder.orderId);
         }
 
 
@@ -268,6 +284,14 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
         userAssetbalance.locked -= margin
         userAssetbalance.available += margin
       }
+      if (OrderRecord) {
+        updatedOrderIds.add(OrderRecord.orderId);
+      }
+      const ordersToPublish = Array.from(updatedOrderIds).map(id => ORDERS.get(id)).filter(Boolean);
+      publishDbEvent("trade-event", {
+        orders: ordersToPublish,
+        fills
+      }).catch(err => console.error("Failed to publish trade-event:", err));
       return OrderRecord
     }
 
@@ -291,7 +315,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
         averagePrice,
         margin: marginUsed,
         leverage,
-        liquidationPrice: 0,
+        liquidationPrice: calculateLiquidationPrice("long", averagePrice, qtyFilledSoFar, marginUsed),
         realisedPnL: 0,
         updatedAt: createdAt
       }
@@ -303,6 +327,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
       existingUserPosition.qty = totalQty,
         existingUserPosition.margin += marginUsed
       existingUserPosition.leverage = (existingUserPosition.averagePrice * existingUserPosition.qty) / existingUserPosition.margin
+      existingUserPosition.liquidationPrice = calculateLiquidationPrice("long", existingUserPosition.averagePrice, existingUserPosition.qty, existingUserPosition.margin)
       existingUserPosition.updatedAt = createdAt
     } else {
       const closedQty = Math.min(qtyFilledSoFar, existingUserPosition.qty)
@@ -328,7 +353,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
             averagePrice,
             margin: marginForNewPosition,
             leverage: (averagePrice * remainingNewQty) / marginForNewPosition,
-            liquidationPrice: 0,
+            liquidationPrice: calculateLiquidationPrice("long", averagePrice, remainingNewQty, marginForNewPosition),
             realisedPnL: 0,
             updatedAt: createdAt
           }
@@ -339,6 +364,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
         existingUserPosition.qty -= closedQty
         existingUserPosition.margin -= marginToRelease
         existingUserPosition.leverage = (existingUserPosition.averagePrice * existingUserPosition.qty) / existingUserPosition.margin
+        existingUserPosition.liquidationPrice = calculateLiquidationPrice("long", existingUserPosition.averagePrice, existingUserPosition.qty, existingUserPosition.margin)
         existingUserPosition.updatedAt = createdAt
         marginForPosition = 0
       }
@@ -370,7 +396,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
 
     if (type === "market") {
       //sllipage calculation 
-      minSellPrice = ((bestBid!) - (sllipage / 100) * bestBid!)
+      minSellPrice = bestBid !== undefined ? (bestBid - (sllipage / 100) * bestBid) : 0
 
       userAssetbalance.available -= margin
       userAssetbalance.locked += margin
@@ -386,7 +412,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
     let averagePrice = 0;
     let totoalCostOfOrder = 0;
     let fill: Fill
-    let fills: Fill[] = [];
+
 
     for (const bestprice of sortedBestBidsPrices) {
 
@@ -436,6 +462,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
           } else {
             makerOrder.status = "filled"
           }
+          updatedOrderIds.add(makerOrder.orderId);
         }
 
         if (RestingOrder.filledQty < RestingOrder.qty) {
@@ -511,6 +538,14 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
         userAssetbalance.locked -= margin
         userAssetbalance.available += margin
       }
+      if (OrderRecord) {
+        updatedOrderIds.add(OrderRecord.orderId);
+      }
+      const ordersToPublish = Array.from(updatedOrderIds).map(id => ORDERS.get(id)).filter(Boolean);
+      publishDbEvent("trade-event", {
+        orders: ordersToPublish,
+        fills
+      }).catch(err => console.error("Failed to publish trade-event:", err));
       return OrderRecord
     }
 
@@ -534,7 +569,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
         averagePrice,
         margin: marginUsedSell,
         leverage: leverageSell,
-        liquidationPrice: 0,
+        liquidationPrice: calculateLiquidationPrice("short", averagePrice, qtyFilledSoFar, marginUsedSell),
         realisedPnL: 0,
         updatedAt: createdAt
       }
@@ -546,6 +581,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
       existingUserPositionSell.qty = totalQty
       existingUserPositionSell.margin += marginUsedSell
       existingUserPositionSell.leverage = (existingUserPositionSell.averagePrice * existingUserPositionSell.qty) / existingUserPositionSell.margin
+      existingUserPositionSell.liquidationPrice = calculateLiquidationPrice("short", existingUserPositionSell.averagePrice, existingUserPositionSell.qty, existingUserPositionSell.margin)
       existingUserPositionSell.updatedAt = createdAt
     } else {
       const closedQtySell = Math.min(qtyFilledSoFar, existingUserPositionSell.qty)
@@ -571,7 +607,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
             averagePrice,
             margin: marginForNewPosition,
             leverage: (averagePrice * remainingNewQtySell) / marginForNewPosition,
-            liquidationPrice: 0,
+            liquidationPrice: calculateLiquidationPrice("short", averagePrice, remainingNewQtySell, marginForNewPosition),
             realisedPnL: 0,
             updatedAt: createdAt
           }
@@ -582,6 +618,7 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
         existingUserPositionSell.qty -= closedQtySell
         existingUserPositionSell.margin -= marginToReleaseSell
         existingUserPositionSell.leverage = (existingUserPositionSell.averagePrice * existingUserPositionSell.qty) / existingUserPositionSell.margin
+        existingUserPositionSell.liquidationPrice = calculateLiquidationPrice("short", existingUserPositionSell.averagePrice, existingUserPositionSell.qty, existingUserPositionSell.margin)
         existingUserPositionSell.updatedAt = createdAt
         marginForPositionSell = 0
       }
@@ -594,6 +631,15 @@ export function handleCreateOrder(payload: Record<string, unknown>) {
     }
 
   }
+
+  if (OrderRecord) {
+    updatedOrderIds.add(OrderRecord.orderId);
+  }
+  const ordersToPublish = Array.from(updatedOrderIds).map(id => ORDERS.get(id)).filter(Boolean);
+  publishDbEvent("trade-event", {
+    orders: ordersToPublish,
+    fills
+  }).catch(err => console.error("Failed to publish trade-event:", err));
 
   return OrderRecord
 }

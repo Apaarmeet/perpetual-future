@@ -45,6 +45,20 @@ model Fill {
   
 }
 
+model Candle {
+  id        String   @id @default(uuid()) @db.Uuid
+  symbol    String
+  interval  String   
+  open      Decimal
+  high      Decimal
+  low       Decimal
+  close     Decimal
+  volume    Decimal
+  timestamp DateTime
+
+  @@unique([symbol, interval, timestamp])
+}
+
 enum OrderStatus {
   open
   partially_filled

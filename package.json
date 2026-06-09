@@ -4,7 +4,8 @@
   "workspaces": {
     "packages": [
       "apps/*",
-      "packages/*"
+      "packages/*",
+      "scripts"
     ],
     "catalog": {
       "dotenv": "^17.2.2",
@@ -28,6 +29,10 @@
     "check-types": "turbo check-types",
     "dev:web": "turbo -F web dev",
     "dev:server": "turbo -F server dev",
+    "dev:simulator": "turbo -F simulator dev",
+    "start:backend": "bash ./start-backend.sh",
+    "start:frontend": "bash ./start-frontend.sh",
+    "start:simulator": "bash ./start-simulator.sh",
     "db:push": "turbo -F @perps-turbo-repo/db db:push",
     "db:studio": "turbo -F @perps-turbo-repo/db db:studio",
     "db:generate": "turbo -F @perps-turbo-repo/db db:generate",

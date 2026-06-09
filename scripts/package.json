@@ -1,0 +1,13 @@
+{
+  "name": "scripts",
+  "private": true,
+  "dependencies": {
+    "@perps-turbo-repo/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

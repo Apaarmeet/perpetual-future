@@ -1,0 +1,6 @@
+{
+  "extends": "@perps-turbo-repo/config/tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true
+  }
+}
